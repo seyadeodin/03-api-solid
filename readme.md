@@ -56,3 +56,17 @@
     ]
   },
   ```
+
+# Docker
+- To use bitnami postgres  image forthe first time
+`docker run --name api-solid-pg -e POSTGRESQL_USERNAME=docker -e POSTGRESQL_PASSWORD=docker -e POSTGRESQL_DATABAS=apisolid -p 5432:5432  bitnami/postgresql`
+- To run it again `docker start api-solid-pg``
+- To stop `docker stop api-solid-pg`
+- And see list of images: `docker ps`
+
+# Docker Compose
+- Docker compose is a tool we use to create the necessary containers to run our application. 
+- We do it by creating a file and specifying all containers and settings necessary for it to run.
+- To run: `docker compose up -d` [-d is detached]
+- To stop: `docker compose stop`
+- To delete it: `docker compose down`

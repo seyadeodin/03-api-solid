@@ -5,4 +5,4 @@ app
     host: '0.0.0.0',
     port: 3333,
   })
-  .then(() => console.log('SOBEEE 🚀'))
+  .then(() => console.log('SOBEEE :3333 🚀'))
