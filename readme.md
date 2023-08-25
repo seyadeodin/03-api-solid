@@ -70,3 +70,102 @@
 - To run: `docker compose up -d` [-d is detached]
 - To stop: `docker compose stop`
 - To delete it: `docker compose down`
+
+# Use case and design patterns
+
+### Controller
+- Starting with our controller on [./src/http/controllers/register.ts] is where we receive the data from the request, parse it,and send back the reply. It is also here our use-case and repository are declared and used, and whre our catch all is located to treat the error and send it back to the user.
+
+### Repository
+- Is where our data storage is located, we abstract it with [./src/repositories/users-repository.ts] where the interface, our contract is declared with the methods and parameters needed.
+    ```tsx
+    import { Prisma, User } from '@prisma/client'
+
+    export interface UsersRepository {
+      create(data: Prisma.UserCreateInput): Promise<User>
+      findByEmail(email: string): Promise<User | null>
+    }
+    ```
+- It is implemented in [./src/repositories/prisma/prisma-users-repository.ts]. Here we create a class that implements our itnerface and makes the data transcations using prisma.
+```tsx
+    import { Prisma, User } from '@prisma/client'
+    import { prisma } from '@/lib/prisma'
+    import { UsersRepository } from '../users-repository'
+
+    export class PrismaUsersRepository implements UsersRepository {
+      async create({ name, email, password_hash }: Prisma.UserCreateInput) {
+        const user = await prisma.user.create({
+          data: {
+            name,
+            email,
+            password_hash,
+          },
+        })
+
+        return user
+      }
+
+      async findByEmail(email: string) {
+        const user = await prisma.user.findUnique({
+          where: {
+            email,
+          },
+        })
+        return user
+      }
+    }
+```
+
+### Use-case
+- The use-case is where our business logic is created. On thte constructor the user repository is received as a parameter. After we do the necessary transformations and further validation of our data we pass it to our reository to store it.
+    - By declaring our `usersRepository` as property of our constructor with a modifier as a prefix ts automatically delclares it in our class so we can call it with `this.usersRepository`
+    ```tsx
+    import { hash } from 'bcryptjs'
+    import { RegisterBodyType } from '@/http/controllers/register'
+    import { AppError } from '@/shared/errors/AppErrors'
+    import { UsersRepository } from '@/repositories/users-repository'
+
+    export class RegisterUseCase {
+      constructor(private usersRepository: UsersRepository) {}
+
+      async execute({ name, email, password }: RegisterBodyType) {
+        const password_hash = await hash(password, 6)
+
+        const userWithSameEmail = await this.usersRepository.findByEmail(email)
+
+        if (userWithSameEmail) {
+          throw new AppError('Email already exists', 409)
+        }
+
+        await this.usersRepository.create({
+          name,
+          email,
+          password_hash,
+        })
+      }
+    }
+
+    ```
+
+### Error treatment
+- To treat erros globally in our application we declare in [./src/app.ts] a `app.setErrorHandler` which will receives all erros that get thrown at the last(first) level of our application and treat it. Here we treat our zod errors and unknown origin errors. We also leave a space where we can add an external tool to monitor errors like Sentry, Datalog and NewRelic
+    ```tsx
+    app.setErrorHandler((err, _, reply) => {
+      if (err instanceof ZodError) {
+        return reply
+          .status(400)
+          .send({ message: 'Validation erro.', issues: err.format() })
+      }
+
+      if (env.NODE_ENV !== 'production') {
+        console.error(err)
+      } else {
+        // Here we add an external tool like Datalog/NewRelic/Sentry
+      }
+
+      return reply.status(500).send({ message: 'Internal server error.' })
+    })
+
+    ```
+
+# 

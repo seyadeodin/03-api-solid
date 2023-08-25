@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsup src --out-dir build"
+    "build": "tsup src --out-dir build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "author": "",
   "license": "ISC",
@@ -24,6 +26,7 @@
     "bcryptjs": "2.4.3",
     "dotenv": "16.3.0",
     "fastify": "4.21.0",
+    "vitest": "0.34.3",
     "zod": "3.21.4"
   }
 }
