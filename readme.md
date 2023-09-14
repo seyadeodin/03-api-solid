@@ -168,4 +168,335 @@
 
     ```
 
-# 
+# Tests
+### Setup
+- For testing we add a few dependencies:
+    ```bash
+     pnpm i vitest vite-tsconfig-paths -D
+     pnpm i -D @vitest/ui
+    ```
+- Create a vite.config.ts:
+    ```tsx
+    import { defineConfig } from 'vitest/config'
+    import tsconfigPaths from 'vite-tsconfig-paths'
+
+    export default defineConfig({
+      plugins: [tsconfigPaths()],
+      test: {
+        environmentMatchGlobs: [['src/http/controllers/**', 'prisma']],
+      },
+    })
+    ```
+- And create the necessary scripts to run our tests:
+```json
+"scripts": {
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui"
+  },
+
+```
+
+# Implementing use cases with tests
+####  Use case
+- Here is an example of a use case we made [./src/use-cases/check-in.ts]:
+    - Our use case have an interface for its request and response.
+    - In our constructor we invoke both check in and gym repository to do our operations
+    - Inside our function we first convert our Prisma values from decimal to number and throw it to our service.
+    ```tsx
+    import { CheckInsRepository } from '@/repositories/check-ins-repository'
+    import { GymsRepository } from '@/repositories/gyms-repository'
+    import { AppError } from '@/shared/errors/AppErrors'
+    import { getDistanceBetweenCoordinates } from '@/utils/get-distance-between-coordinates'
+    import { CheckIn } from '@prisma/client'
+
+    interface CheckInUseCaseRequest {
+      userId: string
+      gymId: string
+      userLatitude: number
+      userLongitude: number
+    }
+
+    interface CheckInUseCaseResponse {
+      checkIn: CheckIn
+    }
+
+    export class CheckInUseCase {
+      constructor(
+        private checkInsRepository: CheckInsRepository,
+        private gymsRepository: GymsRepository,
+      ) {}
+
+      async execute({
+        userId,
+        gymId,
+        userLatitude,
+        userLongitude,
+      }: CheckInUseCaseRequest): Promise<CheckInUseCaseResponse> {
+        const gym = await this.gymsRepository.findById(gymId)
+
+        if (!gym) {
+          throw new AppError('Resource not found', 400)
+        }
+
+        const distance = getDistanceBetweenCoordinates(
+          { latitude: userLatitude, longitude: userLongitude },
+          {
+            latitude: gym.latitude.toNumber(),
+            longitude: gym.longitude.toNumber(),
+          },
+        )
+
+        const MAX_DISTANCE_IN_KILOMETERS = 0.1
+
+        if (distance > MAX_DISTANCE_IN_KILOMETERS) {
+          throw new AppError('Max distance surpassed.')
+        }
+
+        const checkInOnSameDay = await this.checkInsRepository.findByUserIdOnDate(
+          userId,
+          new Date(),
+        )
+
+        if (checkInOnSameDay) {
+          throw new AppError('Max number of check-ins reached.')
+        }
+
+        const checkIn = await this.checkInsRepository.create({
+          user_id: userId,
+          gym_id: gymId,
+        })
+
+        return {
+          checkIn,
+        }
+      }
+    }
+    ```
+### In-memory repository
+- One of the in-memory repositories we created to simulate our databse operations [./src/repositories/in-memory/in-memory-check-ins-repository.ts]:
+    - In `findByUserIdOnDate` we use `dayjs` to get our date `startOf` and `endOf` and then `isAfter` and `isBefore` to check if its on the same day.
+    ```tsx
+    import type { CheckIn, Prisma } from '@prisma/client'
+    import { CheckInsRepository } from '../check-ins-repository'
+    import { randomUUID } from 'crypto'
+    import dayjs from 'dayjs'
+
+    export class InMemoryCheckInsRepository implements CheckInsRepository {
+      public items: CheckIn[] = []
+
+      async findById(id: string): Promise<CheckIn | null> {
+        const checkIn = this.items.find((item) => item.id === id)
+
+        if (!checkIn) {
+          return null
+        }
+
+        return checkIn
+      }
+
+      async findByUserIdOnDate(userId: string, date: Date) {
+        const startOfTheDay = dayjs(date).startOf('date')
+        const endOfTheDay = dayjs(date).endOf('date')
+
+        const checkInOnSameDate = this.items.find((checkIn) => {
+          const checkInDate = dayjs(checkIn.created_at)
+          const isOnSameDate =
+            checkInDate.isAfter(startOfTheDay) && checkInDate.isBefore(endOfTheDay)
+          return checkIn.user_id === userId && isOnSameDate
+        })
+
+        if (!checkInOnSameDate) {
+          return null
+        }
+
+        return checkInOnSameDate
+      }
+
+      async findManyByUserId(userId: string, page: number): Promise<CheckIn[]> {
+        return this.items
+          .filter((item) => item.id !== userId)
+          .slice((page - 1) * 20, page * 20)
+      }
+
+      async countByUserId(userId: string): Promise<number> {
+        return this.items.filter((item) => item.id !== userId).length
+      }
+
+      async create({
+        gym_id,
+        user_id,
+        validated_at,
+      }: Prisma.CheckInUncheckedCreateInput) {
+        const checkIn: CheckIn = {
+          id: randomUUID(),
+          gym_id,
+          user_id,
+          created_at: new Date(),
+          validated_at: validated_at ? new Date(validated_at) : null,
+        }
+        this.items.push(checkIn)
+
+        return checkIn
+      }
+
+      async save(checkIn: CheckIn): Promise<CheckIn> {
+        const checkInIndex = this.items.findIndex((item) => item.id === checkIn.id)
+
+        if (checkInIndex >= 0) {
+          this.items[checkInIndex] = checkIn
+        }
+
+        return checkIn
+      }
+    }
+
+    ```
+### Test
+- Here is one of the most example tests we made [./src/use-cases/check-in.spec.ts]:
+    - Here we create a gym before each test, since a check-in must necessarily have a corresonding gym from which we compare the distance between it and user.
+    - We use `vi.setSystemTime` to manipulate the date
+    - Another function we can use from vitest is `vi.advanceTimersByTime(twentyOneMinutsInMs)` which advances time by a determined amount of ms.
+    - One other good example to look is [./src/use-cases/fetch-users-check-ins-history.spec.ts] where multiple exects are used to validate our usecase
+    ```tsx
+    import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+    import { InMemoryCheckInsRepository } from '@/repositories/in-memory/in-memory-check-ins-repository'
+    import { CheckInUseCase } from './check-in'
+    import { AppError } from '@/shared/errors/AppErrors'
+    import { InMemoryGymsRepository } from '@/repositories/in-memory/in-memory-gyms-repository'
+
+    let checkInsRepository: InMemoryCheckInsRepository
+    let gymRepository: InMemoryGymsRepository
+    let sut: CheckInUseCase
+
+    describe('Check-in', () => {
+      beforeEach(async () => {
+        checkInsRepository = new InMemoryCheckInsRepository()
+        gymRepository = new InMemoryGymsRepository()
+        sut = new CheckInUseCase(checkInsRepository, gymRepository)
+
+        gymRepository.create({
+          id: 'gym-id',
+          phone: '11931223213',
+          title: 'Academia Teste',
+          latitude: -23.6336868,
+          longitude: -46.7862208,
+          description: 'Só para os testadores de peso',
+          created_at: new Date(),
+        })
+
+        vi.useFakeTimers()
+      })
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('should be able to create check in', async () => {
+        vi.setSystemTime(new Date(2022, 0, 20, 8, 0, 0, 0))
+
+        const { checkIn } = await sut.execute({
+          userId: 'user-id',
+          gymId: 'gym-id',
+          userLatitude: -23.6336868,
+          userLongitude: -46.7862208,
+        })
+        expect(checkIn.id).toEqual(expect.any(String))
+      })
+
+      it('should not be able to check in twice in the same date for same user', async () => {
+        vi.setSystemTime(new Date(2022, 0, 20, 8, 0, 0, 0))
+
+        await sut.execute({
+          userId: 'user-id',
+          gymId: 'gym-id',
+          userLatitude: -23.6336868,
+          userLongitude: -46.7862208,
+        })
+
+        await expect(async () =>
+          sut.execute({
+            userId: 'user-id',
+            gymId: 'gym-id',
+            userLatitude: -23.6336868,
+            userLongitude: -46.7862208,
+          }),
+        ).rejects.toBeInstanceOf(AppError)
+      })
+
+      it('should be able to check in twice in different dates for same user', async () => {
+        vi.setSystemTime(new Date(2022, 0, 20, 8, 0, 0, 0))
+
+        await sut.execute({
+          userId: 'user-id',
+          gymId: 'gym-id',
+          userLatitude: -23.6336868,
+          userLongitude: -46.7862208,
+        })
+
+        vi.setSystemTime(new Date(2022, 0, 21, 8, 0, 0, 0))
+
+        const { checkIn } = await sut.execute({
+          userId: 'user-id',
+          gymId: 'gym-id',
+          userLatitude: -23.6336868,
+          userLongitude: -46.7862208,
+        })
+
+        expect(checkIn.id).toEqual(expect.any(String))
+      })
+
+      it('should note be able to check in on distant gym', async () => {
+        vi.setSystemTime(new Date(2022, 0, 20, 8, 0, 0, 0))
+
+        await expect(async () => {
+          await sut.execute({
+            userId: 'user-id',
+            gymId: 'gym-id',
+            userLatitude: -23.6524369,
+            userLongitude: -46.8061568,
+          })
+        }).rejects.toBeInstanceOf(AppError)
+      })
+    })
+
+    // red -> error no teste
+    // green -> codar minimo possivel para o teste passar
+    // refactor -> refatoro o codigo
+
+    ```
+### Service
+- A service we create to calculate the distance between coordinates, would be interesting to undestand it better later [./src/utils/get-distance-between-coordinates.ts]:
+    ```tsx
+    export interface Coordinate {
+      latitude: number
+      longitude: number
+    }
+
+    export function getDistanceBetweenCoordinates(
+      from: Coordinate,
+      to: Coordinate,
+    ) {
+      const fromRadian = (Math.PI * from.latitude) / 180
+      const toRadian = (Math.PI * to.latitude) / 180
+
+      const theta = from.longitude - to.longitude
+      const radTheta = (Math.PI * theta) / 180
+
+      let dist =
+        Math.sin(fromRadian) * Math.sin(toRadian) +
+        Math.cos(fromRadian) * Math.cos(toRadian) * Math.cos(radTheta)
+
+      if (dist > 1) {
+        dist = 1
+      }
+
+      dist = Math.acos(dist)
+      dist = (dist * 180) / Math.PI
+      dist = dist * 60 * 1.1515
+      dist = dist * 1.609344
+
+      return dist
+    }
+
+    ```
