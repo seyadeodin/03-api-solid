@@ -500,3 +500,13 @@
     }
 
     ```
+### Factory
+
+
+# Controllers and E2E tests
+### JWT
+- JSON web tokens are unique, non modifiable stateless tokens created by our backend from a keyword. It is separated in header.payload.verify_signature. 
+    - Header contains the algorithm we used to generate our token
+    - Payload contains the data of our user his id being named as sub
+    - Our signature is what protects the data in our payload fro mbeing modified.
+- JWT is a form of authentication which works bettwer when used with HTTP routes, for that reason it will be contained in our http layer.
