@@ -10,7 +10,7 @@ interface FetchUserscheckInsHistoryUseCaseResponse {
   checkIns: CheckIn[]
 }
 
-export class FetchUserscheckInsHistoryUseCase {
+export class FetchUsersCheckInsHistoryUseCase {
   constructor(private checkInsRepository: CheckInsRepository) {}
 
   async execute({
