@@ -510,3 +510,7 @@
     - Payload contains the data of our user his id being named as sub
     - Our signature is what protects the data in our payload fro mbeing modified.
 - JWT is a form of authentication which works bettwer when used with HTTP routes, for that reason it will be contained in our http layer.
+
+### Creating test environemnt
+- npm link
+- npm link vitest-environment-prisma
