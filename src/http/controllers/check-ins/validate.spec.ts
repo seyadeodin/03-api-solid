@@ -33,7 +33,6 @@ describe('Validate check-in (e2e)', () => {
       },
     })
 
-    // app.post('/gyms/:gymId/check-ins', create)
     const response = await request(app.server)
       .patch(`/gyms/${checkIn.id}/validate`)
       .set('Authorization', `Bearer ${token}`)
@@ -43,7 +42,7 @@ describe('Validate check-in (e2e)', () => {
       })
     console.log(
       'LS -> src/http/controllers/check-ins/create.spec.ts:27 -> response: ',
-      response.body,
+      JSON.stringify(response.body),
     )
 
     expect(response.statusCode).toEqual(200)

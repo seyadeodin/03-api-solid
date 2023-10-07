@@ -511,6 +511,161 @@
     - Our signature is what protects the data in our payload fro mbeing modified.
 - JWT is a form of authentication which works bettwer when used with HTTP routes, for that reason it will be contained in our http layer.
 
+### Creating a controller
+- An example of a controller in [./src/http/controllers/gyms/create.ts]. We validate the data received through a schema, execute our useCase and return a status.
+    ```tsx
+    import { FastifyRequest, FastifyReply } from 'fastify'
+    import { z } from 'zod'
+    import { makeCreateGymUseCase } from '@/use-cases/factories/make-create-gym-use-case'
+
+    const createGymBodySchema = z.object({
+      title: z.string(),
+      description: z.string().nullable(),
+      phone: z.string().nullable(),
+      latitude: z.number().refine(
+        (value) => Math.abs(value) <= 90,
+        // Math.abs(absolute) transforms our value into a positive one
+      ),
+      longitude: z.number().refine((value) => Math.abs(value) <= 180),
+    })
+
+    export type RegisterBodyType = z.infer<typeof createGymBodySchema>
+
+    export async function create(request: FastifyRequest, reply: FastifyReply) {
+      const { title, description, phone, latitude, longitude } =
+        createGymBodySchema.parse(request.body)
+
+      const createGymUseCase = makeCreateGymUseCase()
+
+      await createGymUseCase.execute({
+        title,
+        description,
+        phone,
+        latitude,
+        longitude,
+      })
+
+      return reply.status(201).send()
+    }
+
+    ```
+- In [./src/http/controllers/check-ins/routes.ts]
+    - Here is an example of routing. When we're modyfing a specific checkIn or gym, we code it as a params.
+    - Notice that even tho a route is in the check-in route it is still accessed through the `/gyms` since a check-in or validation is done to a gym.
+    ```tsx
+    export async function checkInsRoutes(app: FastifyInstance) {
+      app.addHook('onRequest', verifyJWT)
+
+      app.get('/check-ins/history', history)
+      app.get('/check-ins/metrics', metrics)
+
+      app.post('/gyms/:gymId/check-ins', create)
+      app.patch('/gyms/:checkInId/validate', create)
+    }
+    ```
+
 ### Creating test environemnt
-- npm link
-- npm link vitest-environment-prisma
+- To create a test environment we need to follow a few steps:
+    1. Create [./src/prisma/prisma-users-repository] folder
+    2. npm start it
+    3. Add to [./src/vite.config.ts]:
+        ```tsx
+          test: {
+            environmentMatchGlobs: [['src/http/controllers/**', 'prisma']],
+          },
+
+        ```
+    4. Create a link between our prima-users-repository and project running `npm link` on [./prisma/vitest-environment-prisma/] and `npm link vitest-environment-prism` on [./]
+    5. To avoid the need of having to repeat the linking process on every environemnt we use we create the following scripts on [./package.json] (we also need to install npm-run-all for it to run on non-unix complianat systems) for that:
+        - On npm we can add pre and post to run commands before and after our command is runt.
+   ```json
+   {
+    "test:create-prisma-environment": "npm link ./prisma/vitest-environment-prisma",
+    "test:install-prisma-environment": "npm link vitest-environment-prisma",
+    "build": "tsup src --out-dir build",
+    "test": "vitest run --dir src/use-cases",
+    "test:watch": "vitest --dir src/use-cases",
+    "pretest:e2e": "run-s test:create-prisma-environment test:install-prisma-environment",
+    "test:e2e": "vitest run --dir src/http",
+   }
+   ``` 
+### Creating a E2E test
+- In [./src/http/controllers/check-ins/validate.spec.ts] we have complete example of a e2e validation
+    - We use supertest to call our app and call our endpoints, before each and after every test we ready and close it.
+    - To create our user and get our token we created a function that can be called for the various tests wwhere it is needed.
+    - For operations besides our main one, for the memoment we call directly prisma to create our entries.
+    - After that's done we call the route we want 
+        - Here we use `patch` but we could use any other http method aswell
+        - `.send` for a json body but for query params we can use `query`
+        - `.set` to add our bearer token to our header with the name authorization
+    ```tsx
+    import request from 'supertest'
+    import { app } from '@/app'
+    import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+    import { createAndAuthenticateUser } from '@/utils/test/create-and-authenticate-user'
+    import { createAndGetGym } from '@/utils/test/create-and-get-gym'
+    import { prisma } from '@/lib/prisma'
+
+    describe('Validate check-in (e2e)', () => {
+      beforeAll(async () => {
+        await app.ready()
+      })
+
+      afterAll(async () => {
+        await app.close()
+      })
+
+      it('should be able to validate check-in', async () => {
+        const { token } = await createAndAuthenticateUser(app)
+        const user = await prisma.user.findFirstOrThrow()
+
+        const gym = await prisma.gym.create({
+          data: {
+            title: 'Powerlifter Gym',
+            latitude: -23.6336868,
+            longitude: -46.7862208,
+          },
+        })
+
+        const checkIn = await prisma.checkIn.create({
+          data: {
+            gym_id: gym.id,
+            user_id: user.id,
+          },
+        })
+
+        const response = await request(app.server)
+          .patch(`/gyms/${checkIn.id}/validate`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            latitude: -23.6336868,
+            longitude: -46.7862208,
+          })
+
+        expect(response.statusCode).toEqual(200)
+      })
+    })
+    ```
+- Function to register and create authentication on [./src/utils/test/create-and-authenticate-user.ts]
+    ```tsx
+    import { FastifyInstance } from 'fastify'
+    import request from 'supertest'
+
+    export async function createAndAuthenticateUser(app: FastifyInstance) {
+      await request(app.server).post('/users').send({
+        name: 'João Cabeção',
+        email: 'joao.cabecao@email.com',
+        password: 'password',
+      })
+
+      const authResponse = await request(app.server).post('/sessions').send({
+        email: 'joao.cabecao@email.com',
+        password: 'password',
+      })
+
+      const { token } = authResponse.body
+
+      return { token }
+    }
+
+    ```
