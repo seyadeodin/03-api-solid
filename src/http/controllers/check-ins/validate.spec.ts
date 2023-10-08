@@ -2,7 +2,6 @@ import request from 'supertest'
 import { app } from '@/app'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createAndAuthenticateUser } from '@/utils/test/create-and-authenticate-user'
-import { createAndGetGym } from '@/utils/test/create-and-get-gym'
 import { prisma } from '@/lib/prisma'
 
 describe('Validate check-in (e2e)', () => {
@@ -15,7 +14,7 @@ describe('Validate check-in (e2e)', () => {
   })
 
   it('should be able to validate check-in', async () => {
-    const { token } = await createAndAuthenticateUser(app)
+    const { token } = await createAndAuthenticateUser({ app })
     const user = await prisma.user.findFirstOrThrow()
 
     const gym = await prisma.gym.create({
@@ -40,11 +39,7 @@ describe('Validate check-in (e2e)', () => {
         latitude: -23.6336868,
         longitude: -46.7862208,
       })
-    console.log(
-      'LS -> src/http/controllers/check-ins/create.spec.ts:27 -> response: ',
-      JSON.stringify(response.body),
-    )
 
-    expect(response.statusCode).toEqual(200)
+    expect(response.statusCode).toEqual(204)
   })
 })
