@@ -14,7 +14,7 @@ describe('Create check-in (e2e)', () => {
   })
 
   it('should be able to check-in', async () => {
-    const { token } = await createAndAuthenticateUser({ app })
+    const { token } = await createAndAuthenticateUser({ app, role: 'ADMIN' })
     const gym = await createAndGetGym(app, token)
 
     // app.post('/gyms/:gymId/check-ins', create)
@@ -25,10 +25,6 @@ describe('Create check-in (e2e)', () => {
         latitude: -23.6336868,
         longitude: -46.7862208,
       })
-    console.log(
-      'LS -> src/http/controllers/check-ins/create.spec.ts:27 -> response: ',
-      response.body,
-    )
 
     expect(response.statusCode).toEqual(201)
   })
